@@ -18,22 +18,18 @@ from streamlit_folium import st_folium
 # 1. CONFIGURACIÓN DE PÁGINA (¡DEBE SER LO PRIMERO DE STREAMLIT!)
 # ----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Mapa de Colombia", 
-    page_icon="🗺️", 
+    page_title="Verificación información estaciones_IDEAM",  
     layout="wide"
 )
 
 # ----------------------------------------------------------------------------
-# Rutas y Constantes
+# Rutas y Constantes (Consistentes para Local y Cloud)
 # ----------------------------------------------------------------------------
-#BASE_DIR = Path("F:/proyectos/contraloria_2026_419est")
-#EXCEL_PATH = BASE_DIR / "ESTADO_RED_CTR.xlsx"
-#PDF_DIR = Path("F:/proyectos/contraloria_2026_419est/contr_imagenes2")
-CENTRO_COLOMBIA = [4.5709, -74.2973]
-
 BASE_DIR = Path(__file__).parent
 EXCEL_PATH = BASE_DIR / "ESTADO_RED_CTR.xlsx"
 PDF_DIR = BASE_DIR / "contr_imagenes2"
+CENTRO_COLOMBIA = [4.5709, -74.2973]
+
 
 @st.cache_data(show_spinner=False)
 def cargar_puntos() -> pd.DataFrame:
@@ -172,7 +168,7 @@ def construir_mapa(df: pd.DataFrame, seleccionado_id=None, color_por="FAMILIA") 
 # Interfaz de Usuario
 # ----------------------------------------------------------------------------
 st.title("🗺️ Mapa de puntos en Colombia")
-st.caption("Haz clic en un punto para ver su información y su reporte.")
+st.caption("Haz clic en un punto en el mapa o selecciónalo en la lista desplegable.")
 
 df = cargar_puntos()
 df_datos = cargar_datos_variables()
@@ -197,9 +193,35 @@ with col_mapa:
             st.rerun()
 
 with col_info:
+    # --- LISTA DESPLEGABLE PARA BUSCAR ESTACIÓN ---
+    df_sorted = df.sort_values("NOMBRE_CNE")
+    nombres_estaciones = ["-- Selecciona una estación --"] + list(df_sorted["NOMBRE_CNE"].unique())
+    
+    # Encontrar el nombre actual si hay una selección activa
+    nombre_actual = "-- Selecciona una estación --"
+    if st.session_state.seleccion is not None:
+        match_actual = df[df["id"] == st.session_state.seleccion]["NOMBRE_CNE"]
+        if not match_actual.empty:
+            nombre_actual = match_actual.values[0]
+
+    estacion_elegida = st.selectbox(
+        "🔍 Buscar estación por nombre",
+        nombres_estaciones,
+        index=nombres_estaciones.index(nombre_actual) if nombre_actual in nombres_estaciones else 0
+    )
+
+    # Si el usuario selecciona una estación distinta en el menú
+    if estacion_elegida != "-- Selecciona una estación --":
+        fila_seleccionada_menu = df_sorted[df_sorted["NOMBRE_CNE"] == estacion_elegida].iloc[0]
+        nuevo_id = fila_seleccionada_menu["id"]
+        if nuevo_id != st.session_state.seleccion:
+            st.session_state.seleccion = nuevo_id
+            st.rerun()
+
+    # --- MOSTRAR INFORMACIÓN DE LA ESTACIÓN SELECCIONADA ---
     sel = st.session_state.seleccion
     if sel is None:
-        st.info("👈 Selecciona un punto en el mapa.")
+        st.info("👈 Selecciona un punto en el mapa o usa el buscador de arriba.")
         st.dataframe(df[["NOMBRE_CNE", "lat", "lon"]].rename(columns={"NOMBRE_CNE": "Estación"}), hide_index=True, use_container_width=True)
     else:
         fila = df[df["id"] == sel].iloc[0]
@@ -210,31 +232,23 @@ with col_info:
         c1.metric("Latitud", f"{fila['lat']:.4f}")
         c2.metric("Longitud", f"{fila['lon']:.4f}")
 
-        # Buscar conteos en la hoja "datos" usando el NOMBRE_CNE
-        # Buscar conteos en la hoja "datos" usando la columna NOM_AUTO o ID
         if not df_datos.empty:
-            # Buscamos de forma flexible la columna de identificación en la hoja datos
             cols_match = [c for c in df_datos.columns if "nom_auto" in c.lower() or "cne" in c.lower() or "estacion" in c.lower()]
             
             if cols_match:
                 col_estacion = cols_match[0]
-                
-                # Intentamos buscar por ID o por el identificador único de la estación
                 id_estacion = str(fila["id"]).strip()
                 match_datos = df_datos[df_datos[col_estacion].astype(str).str.contains(id_estacion, case=False, na=False)]
                 
-                # Si no encuentra por ID, intentamos por el nombre corto o NOM_AUTO
                 if match_datos.empty and "NOM_AUTO" in df.columns:
                     nom_auto_val = str(fila["NOM_AUTO"]).strip()
                     match_datos = df_datos[df_datos[col_estacion].astype(str).str.contains(nom_auto_val, case=False, na=False)]
                 
                 if not match_datos.empty:
                     reg = match_datos.iloc[0]
-                    
                     detalles_variables = []
                     total_datos = 0
                     
-                    # Buscamos de forma flexible la columna que contenga el total
                     col_total_candidatas = [c for c in df_datos.columns if "total" in c.lower()]
                     col_total_real = col_total_candidatas[0] if col_total_candidatas else None
                     
@@ -257,13 +271,7 @@ with col_info:
                                         detalles_variables.append(f"**{col.replace('_', ' ').title()}** ({int(num_val):,} registros)")
                                 except Exception:
                                     pass
-                    
-                    # Si no encontró una columna con la palabra 'total', sumamos los valores de las variables
-                    if total_datos == 0 and detalles_variables:
-                        # (Opcional respaldo por si la columna total no se detectó)
-                        pass
 
-                    # Título dinámico reflejando el total de datos calculado
                     titulo_seccion = f"Total datos analizados: {total_datos:,}" if total_datos > 0 else "📊 Resumen de Datos Analizados"
                     st.markdown(f"### {titulo_seccion}")
                     
