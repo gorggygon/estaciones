@@ -26,11 +26,14 @@ st.set_page_config(
 # ----------------------------------------------------------------------------
 # Rutas y Constantes
 # ----------------------------------------------------------------------------
-BASE_DIR = Path("F:/proyectos/contraloria_2026_419est")
-EXCEL_PATH = BASE_DIR / "ESTADO_RED_CTR.xlsx"
-PDF_DIR = Path("F:/proyectos/contr_imagenes2")
+#BASE_DIR = Path("F:/proyectos/contraloria_2026_419est")
+#EXCEL_PATH = BASE_DIR / "ESTADO_RED_CTR.xlsx"
+#PDF_DIR = Path("F:/proyectos/contraloria_2026_419est/contr_imagenes2")
 CENTRO_COLOMBIA = [4.5709, -74.2973]
 
+BASE_DIR = Path(__file__).parent
+EXCEL_PATH = BASE_DIR / "ESTADO_RED_CTR.xlsx"
+PDF_DIR = BASE_DIR / "contr_imagenes2"
 
 @st.cache_data(show_spinner=False)
 def cargar_puntos() -> pd.DataFrame:
