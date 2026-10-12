@@ -237,21 +237,31 @@ with col_info:
         c1.metric("Latitud", f"{fila['lat']:.3f}")
         c2.metric("Longitud", f"{fila['lon']:.3f}")
 
-# --- ANÁLISIS ESTADÍSTICO DE LA SELECCIÓN ---
+# --- ANÁLISIS ESTADÍSTICO DINÁMICO DE LA SELECCIÓN ---
         total_estaciones_red = len(df)
-        transmision_actual = str(fila.get("Transmisión", "")).strip()
+        
+        # 'color_por' ya sabe exactamente si estás agrupando por FAMILIA, TECNOLOGIA o Transmisión
+        columna_analisis = color_por 
+        valor_actual = str(fila.get(columna_analisis, "")).strip()
 
-        if transmision_actual and transmision_actual.lower() != "nan":
-            match_grupo = df[df["Transmisión"].astype(str).str.strip().str.upper() == transmision_actual.upper()]
+        # Definir un nombre amigable para mostrar en el texto según la opción elegida
+        nombres_amigables = {
+            "FAMILIA": "familia",
+            "TECNOLOGIA": "tecnología",
+            "Transmisión": "tipo de transmisión"
+        }
+        etiqueta_tipo = nombres_amigables.get(columna_analisis, "categoría")
+
+        if valor_actual and valor_actual.lower() != "nan":
+            match_grupo = df[df[columna_analisis].astype(str).str.strip().str.upper() == valor_actual.upper()]
             cantidad_grupo = len(match_grupo)
             porcentaje = (cantidad_grupo / total_estaciones_red) * 100 if total_estaciones_red > 0 else 0
             
             st.info(
                 f"📈 **Análisis de Red:** De las **{total_estaciones_red}** estaciones en análisis, "
-                f"**{cantidad_grupo}** tienen transmisión tipo **{transmision_actual}** "
+                f"**{cantidad_grupo}** son de {etiqueta_tipo} **{valor_actual}** "
                 f"y corresponden al **{porcentaje:.1f}%** del total."
             )
-
         if not df_datos.empty:
             cols_match = [c for c in df_datos.columns if "nom_auto" in c.lower() or "cne" in c.lower() or "estacion" in c.lower()]
             
