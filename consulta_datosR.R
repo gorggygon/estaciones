@@ -24,11 +24,7 @@ names(conteo_f)<-c("Estacion","1","2","3","4","5","6","7","8","11","12","85","45
 conteo_f <- conteo_f %>%
   mutate(Estacion = as.character(Estacion))
 
-
-cat_pol<-openxlsx::read.xlsx("F:/proyectos/contraloria_2026_419est/estaciones.xlsx",sheet="ajus")
-
-
-
+cat_pol<-openxlsx::read.xlsx("F:/proyectos/contraloria_2026_419est/ESTADO_RED_CTR.xlsx",sheet="ajust")
 
 #cat_pol <- cat_pol %>% 
 #  filter(str_detect(Propietario, "^AO"))
@@ -60,232 +56,232 @@ cat_variables <- data.frame(
 ### consulta datos de cassandra y de polaris
 ######################
 
-for (i in 1:419)
-{
-#i=596
-id=cat_pol[i,2]
-
-##solo definifr las variables de busqueda.
-if (cat_pol[i,4]=="HIDROLÓGICA"){
-  medidas=c(1,7,8)
-}else{
-  medidas=c(1, 2, 3,4,5,6,8,11,12,85,45)
-}
-
-#medidas <- c(1, 2, 3, 4, 5, 6, 7, 11, 12, 8) # Reemplaza con tus IDs
-
-medidas_sql <- paste(medidas, collapse = ", ")
-
-prec_datos<-dbGetQuery(con_scada, paste0(
-  "SELECT id_stz, id_measure, date_record, date_ins, raw_data FROM data_radio.archive_data ",
-  "WHERE id_measure IN (", medidas_sql, ") AND date_record >= CAST('2023-01-02 00:00:00' AS TIMESTAMP)",
-  "AND id_stz = ", id
-))
-
-##CONSULTA ULTIMOS DATOS CASSANDRA COPIA DE POLARIS
-
-prec_datos2<-dbGetQuery(conPres, paste0(
-         "SELECT id_stz, id_measure, date_record, date_ins, raw_data FROM cassandra.polaris.archive_data ",
-         "WHERE id_measure IN (", medidas_sql, ") AND date_record >= CAST('2023-01-02 00:00:00' AS TIMESTAMP) ",
-         "AND id_stz = ", id
-          ))
-
-
-
-
-if (dim (prec_datos)[1]>0 | dim (prec_datos2)[1]>0 ){
-UNION <- bind_rows(prec_datos, prec_datos2)}else{UNION=0}
-
-#stac_<-dbGetQuery(con_scada, paste("SELECT * FROM configuration.stations WHERE id_stz=",id))
-
-##ESTE CONDICIONAL BUSCA LOS CODIGOS ALTERNOS ESTACIONES CON c_
-
-if (!is.na(cat_pol[i,5])){id=cat_pol[i,5]
-
-prec_datos<-dbGetQuery(con_scada, paste0(
-  "SELECT id_stz, id_measure, date_record, date_ins, raw_data FROM data_radio.archive_data ",
-  "WHERE id_measure IN (", medidas_sql, ") AND date_record >= CAST('2023-01-02 00:00:00' AS TIMESTAMP)",
-  "AND id_stz = ", id
-))
-
-##CONSULTA ULTIMOS DATOS CASSANDRA COPIA DE POLARIS
-
-prec_datos2<-dbGetQuery(conPres, paste0(
-  "SELECT id_stz, id_measure, date_record, date_ins, raw_data FROM cassandra.polaris.archive_data ",
-  "WHERE id_measure IN (", medidas_sql, ") AND date_record >= CAST('2023-01-02 00:00:00' AS TIMESTAMP) ",
-  "AND id_stz = ", id
-))
-
-
-if (dim (prec_datos)[1]>0 | dim (prec_datos2)[1]>0 ){
-  UNION2 <- list(prec_datos, prec_datos2) %>%
-    keep(~ !is.null(.x) && nrow(.x) > 0) %>%
-    map_dfr(~ .x %>% mutate(date_ins = as.POSIXct(date_ins)))}else{UNION2=0}
-
-if (dim (UNION2)[1]>0){
-  UNION <- bind_rows(UNION, UNION2)}
-
-}
-
-
-
-
-
-
-
-if (is.data.frame(UNION)){
-prec_datos <- UNION %>% 
-  filter(date_record >= "2023-01-02")
-
-conteo_mensual <- prec_datos %>%
-  mutate(
-    date_record = as.POSIXct(date_record), # Asegura formato fecha/hora
-    ano = year(date_record),
-    mes = month(date_record)
-  ) %>%
-  group_by(ano, mes,id_measure) %>%
-  summarise(total_registros = n(), .groups = "drop") %>%
-  arrange(ano, mes)
-
-conteo_anual <- prec_datos %>%
-  mutate(
-    date_record = as.POSIXct(date_record),
-    ano = year(date_record)
-  ) %>%
-  group_by(ano, id_measure) %>%
-  summarise(total_registros = n(), .groups = "drop") %>%
-  arrange(ano)
-
-conteo_anual_total <- prec_datos %>%
-  mutate(
-    date_record = as.POSIXct(date_record),
-    ano = year(date_record)
-  ) %>%
-  group_by(ano) %>%
-  summarise(total_registros = n(), .groups = "drop") %>%
-  arrange(ano)
-
-conteo_periodo_variable <- prec_datos %>%
-  group_by(id_measure) %>%
-  summarise(
-    total_registros = n(),
-    .groups = "drop"
-  ) %>%
-  arrange(desc(total_registros))
-
-fila_actual <- conteo_periodo_variable %>%
-  mutate(id_measure = as.character(id_measure)) %>%
-  pivot_wider(
-    names_from = id_measure,
-    values_from = total_registros,
-    values_fill = 0
-  ) %>%
-  # Garantiza que existan todas las columnas esperadas, incluso si tuvieron 0 registros
-  bind_rows(as.data.frame(matrix(0, nrow = 0, ncol = length(names(conteo_f)), 
-                                 dimnames = list(NULL, names(conteo_f))))) %>%
-  select(all_of(names(conteo_f)))
-
-fila_actual <- fila_actual %>%
-  mutate(Estacion = as.character(Estacion))
-
-# 3. Agregar la fila a tu matriz/data frame acumulado
-conteo_f <- bind_rows(conteo_f, fila_actual)
-conteo_f[i+1,1]<-cat_pol[i,3]
-
-
-
-# 3. Validar si la consulta devolvió datos
-if (nrow(prec_datos) == 0) {
-  message(paste("La estación", id, "no tiene datos registrados para las variables indicadas."))
-} else {
+for (i in 1:400) {
   
-  # 4. Cruzar datos con el catálogo para obtener los nombres de las variables
-  df_procesado <- prec_datos %>%
-    inner_join(cat_variables, by = "id_measure") %>%
-    mutate(
-      date_record = as.POSIXct(date_record),
-      ano = as.factor(year(date_record)),
-      mes = month(date_record),
-      mes_nombre = factor(
-        mes, 
-        levels = 1:12, 
-        labels = c("Ene", "Feb", "Mar", "Abr", "May", "Jun", 
-                   "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
-      )
-    ) %>%
-    group_by(id_measure, nombre_var, max_esperado, ano, mes_nombre) %>%
-    summarise(total_registros = n(), .groups = "drop")
+  id = cat_pol[i, 2]
   
-  # 5. Generar lista de gráficos individuales (con su propia escala de colores)
-  lista_graficos <- list()
-  
-  # Obtenemos solo las variables que efectivamente tienen datos
-  vars_presentes <- unique(df_procesado$id_measure)
-  
-  for (var_id in vars_presentes) {
-    
-    df_var <- df_procesado %>% filter(id_measure == var_id)
-    nombre_actual <- unique(df_var$nombre_var)
-    max_val <- unique(df_var$max_esperado)
-    
-    # Crear gráfica individual para esta variable
-    p <- ggplot(df_var, aes(x = mes_nombre, y = ano, fill = total_registros)) +
-      geom_tile(color = "white", linewidth = 0.4) +
-      geom_text(aes(label = total_registros), color = "black", size = 2.5) +
-      scale_fill_gradientn(
-        colors = c("#D73027", "#FEE08B", "#1A9850"), # Transición: Rojo -> Amarillo -> Verde
-        values = c(0, 0.5, 1),                      # Distribución de la escala
-        limits = c(0, max_val),                     # 0 = Rojo, max_val = Verde
-        oob = scales::squish,                        # Ajusta valores fuera de rango al límite
-        name = "Datos"
-      ) +
-      labs(
-        title = nombre_actual,
-        x = "Mes",
-        y = "Año"
-      ) +
-      theme_minimal() +
-      theme(
-        panel.grid = element_blank(),
-        plot.title = element_text(face = "bold", size = 11, color = "#1A237E"),
-        axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
-        axis.text.y = element_text(size = 8)
-      )
-    
-    lista_graficos[[as.character(var_id)]] <- p
+  ## solo definir las variables de busqueda.
+  if (cat_pol[i, 4] == "HIDROLÓGICA") {
+    medidas = c(1, 7, 8)
+  } else {
+    medidas = c(1, 2, 3, 4, 5, 6, 8, 11, 12, 85, 45)
   }
   
-  # 6. Unir todas las gráficas creadas en un único panel dinámico
-  panel_final <- wrap_plots(lista_graficos, ncol = 2) + 
-    plot_annotation(
-      title = paste("Disponibilidad de Datos - Estación", cat_pol[i,7],"-",cat_pol[i,4],"Estado: ",cat_pol[i,8]," Tipo TX: ",cat_pol[i,9]),
-      subtitle = "Conteo mensual por variable con escalas adaptadas al total esperado",
-      theme = theme(plot.title = element_text(size = 14, face = "bold"))
-    )
+  medidas_sql <- paste(medidas, collapse = ", ")
   
-  # Mostrar panel final en pantalla
-  #print(panel_final)
+  prec_datos <- dbGetQuery(con_scada, paste0(
+    "SELECT id_stz, id_measure, date_record, date_ins, raw_data FROM data_radio.archive_data ",
+    "WHERE id_measure IN (", medidas_sql, ") AND date_record >= CAST('2023-01-02 00:00:00' AS TIMESTAMP)",
+    "AND id_stz = ", id
+  ))
+  
+  ## CONSULTA ULTIMOS DATOS CASSANDRA COPIA DE POLARIS
+  prec_datos2 <- dbGetQuery(conPres, paste0(
+    "SELECT id_stz, id_measure, date_record, date_ins, raw_data FROM cassandra.polaris.archive_data ",
+    "WHERE id_measure IN (", medidas_sql, ") AND date_record >= CAST('2023-01-02 00:00:00' AS TIMESTAMP) ",
+    "AND id_stz = ", id
+  ))
+  
+  if (dim(prec_datos)[1] > 0 | dim(prec_datos2)[1] > 0) {
+    UNION <- bind_rows(prec_datos, prec_datos2)
+  } else {
+    UNION = 0
+  }
+  
+  ## ESTE CONDICIONAL BUSCA LOS CODIGOS ALTERNOS ESTACIONES CON c_
+  if (!is.na(cat_pol[i, 5])) {
+    id = cat_pol[i, 5]
+    
+    prec_datos <- dbGetQuery(con_scada, paste0(
+      "SELECT id_stz, id_measure, date_record, date_ins, raw_data FROM data_radio.archive_data ",
+      "WHERE id_measure IN (", medidas_sql, ") AND date_record >= CAST('2023-01-02 00:00:00' AS TIMESTAMP)",
+      "AND id_stz = ", id
+    ))
+    
+    prec_datos2 <- dbGetQuery(conPres, paste0(
+      "SELECT id_stz, id_measure, date_record, date_ins, raw_data FROM cassandra.polaris.archive_data ",
+      "WHERE id_measure IN (", medidas_sql, ") AND date_record >= CAST('2023-01-02 00:00:00' AS TIMESTAMP) ",
+      "AND id_stz = ", id
+    ))
+    
+    if (dim(prec_datos)[1] > 0 | dim(prec_datos2)[1] > 0) {
+      UNION2 <- list(prec_datos, prec_datos2) %>%
+        keep(~ !is.null(.x) && nrow(.x) > 0) %>%
+        map_dfr(~ .x %>% mutate(date_ins = as.POSIXct(date_ins)))
+    } else {
+      UNION2 = 0
+    }
+    
+    if (exists("UNION2") && is.data.frame(UNION2) && nrow(UNION2) > 0) {
+      UNION <- bind_rows(UNION, UNION2)
+    }
+  }
+  
+  ## Se ordenan los datos y se hacen las gráficas y conteos
+  if (is.data.frame(UNION)) {
+    prec_datos <- UNION %>% filter(date_record >= "2023-01-02")
+    
+    conteo_mensual <- prec_datos %>%
+      mutate(
+        date_record = as.POSIXct(date_record),
+        ano = year(date_record),
+        mes = month(date_record)
+      ) %>%
+      group_by(ano, mes, id_measure) %>%
+      summarise(total_registros = n(), .groups = "drop") %>%
+      arrange(ano, mes)
+    
+    conteo_anual <- prec_datos %>%
+      mutate(
+        date_record = as.POSIXct(date_record),
+        ano = year(date_record)
+      ) %>%
+      group_by(ano, id_measure) %>%
+      summarise(total_registros = n(), .groups = "drop") %>%
+      arrange(ano)
+    
+    conteo_anual_total <- prec_datos %>%
+      mutate(
+        date_record = as.POSIXct(date_record),
+        ano = year(date_record)
+      ) %>%
+      group_by(ano) %>%
+      summarise(total_registros = n(), .groups = "drop") %>%
+      arrange(ano)
+    
+    conteo_periodo_variable <- prec_datos %>%
+      group_by(id_measure) %>%
+      summarise(
+        total_registros = n(),
+        .groups = "drop"
+      ) %>%
+      arrange(desc(total_registros))
+    
+    fila_actual <- conteo_periodo_variable %>%
+      mutate(id_measure = as.character(id_measure)) %>%
+      pivot_wider(
+        names_from = id_measure,
+        values_from = total_registros,
+        values_fill = 0
+      ) %>%
+      bind_rows(as.data.frame(matrix(0, nrow = 0, ncol = length(names(conteo_f)), 
+                                     dimnames = list(NULL, names(conteo_f))))) %>%
+      select(all_of(names(conteo_f)))
+    
+    fila_actual <- fila_actual %>%
+      mutate(Estacion = as.character(Estacion))
+    
+    fila_actual[1] <- cat_pol[i, 7]
+    
+    fila_actual[setdiff(names(conteo_f), names(fila_actual))] <- 0
+    fila_actual <- fila_actual[names(conteo_f)]
+    
+    if (i == 1) {
+      conteo_f[i, ] <- fila_actual
+    } else {
+      conteo_f <- bind_rows(conteo_f, fila_actual)
+    }
+    
+    # 3. Validar si la consulta procesada devolvió datos para graficar
+    if (nrow(prec_datos) == 0) {
+      message(paste("La estación", id, "no tiene datos registrados para las variables indicadas."))
+    } else {
+      
+      # 4. Cruzar datos con el catálogo para obtener los nombres de las variables
+      df_procesado <- prec_datos %>%
+        inner_join(cat_variables, by = "id_measure") %>%
+        mutate(
+          date_record = as.POSIXct(date_record),
+          ano = as.character(year(date_record)),
+          mes = month(date_record),
+          mes_nombre = factor(
+            mes, 
+            levels = 1:12, 
+            labels = c("Ene", "Feb", "Mar", "Abr", "May", "Jun", 
+                       "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
+          )
+        ) %>%
+        group_by(id_measure, nombre_var, max_esperado, ano, mes_nombre) %>%
+        summarise(total_registros = n(), .groups = "drop") %>%
+        complete(
+          nesting(id_measure, nombre_var, max_esperado),
+          ano = as.character(2023:2026),
+          mes_nombre = factor(c("Ene", "Feb", "Mar", "Abr", "May", "Jun", 
+                                "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"),
+                              levels = c("Ene", "Feb", "Mar", "Abr", "May", "Jun", 
+                                         "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")),
+          fill = list(total_registros = 0)
+        ) %>%
+        mutate(ano = as.factor(ano))
+      
+      # 5. Generar lista de gráficos individuales
+      lista_graficos <- list()
+      vars_presentes <- unique(df_procesado$id_measure)
+      
+      for (var_id in vars_presentes) {
+        df_var <- df_procesado %>% filter(id_measure == var_id)
+        nombre_actual <- unique(df_var$nombre_var)
+        max_val <- unique(df_var$max_esperado)
+        
+        p <- ggplot(df_var, aes(x = mes_nombre, y = ano, fill = total_registros)) +
+          geom_tile(color = "white", linewidth = 0.4) +
+          geom_text(aes(label = ifelse(total_registros == 0, "", total_registros)), color = "black", size = 2.5) +
+          scale_fill_gradientn(
+            colors = c("#D73027", "#FEE08B", "#1A9850"),
+            values = c(0, 0.5, 1),
+            limits = c(0, max_val),
+            oob = scales::squish,
+            name = "Datos"
+          ) +
+          labs(
+            title = nombre_actual,
+            x = "Mes",
+            y = "Año"
+          ) +
+          theme_minimal() +
+          theme(
+            panel.grid = element_blank(),
+            plot.title = element_text(face = "bold", size = 11, color = "#1A237E"),
+            axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+            axis.text.y = element_text(size = 8)
+          )
+        
+        lista_graficos[[as.character(var_id)]] <- p
+      }
+      
+      # 6. Unir gráficas y guardar en la carpeta destino
+      panel_final <- wrap_plots(lista_graficos, ncol = 2) + 
+        plot_annotation(
+          title = paste("Disponibilidad de Datos - Estación", cat_pol[i,7],"-",cat_pol[i,4],"Estado: ",cat_pol[i,9]," Tipo TX: ",cat_pol[i,10]),
+          subtitle = "Conteo mensual por variable con escalas adaptadas al total esperado",
+          theme = theme(plot.title = element_text(size = 14, face = "bold"))
+        )
+      
+      ggsave(
+        filename = paste0("F:/proyectos/contr_imagenes3/", cat_pol[i, 7], "_.pdf"),
+        plot = panel_final,
+        width = 20,
+        height = 12,
+        units = "in",
+        dpi = 500
+      )
+    }
+    
+  } else {
+    message(paste("La estación con ID", id, "no tiene datos en UNION."))
+  }
+  
+  print(i)
+  if (exists("UNION")) rm(UNION)
 }
 
-ggsave(
-  filename = paste0("F:/proyectos/contr_imagenes2/",cat_pol[i,7],"_.pdf"),
-  plot = panel_final,
-  width = 20,
-  height = 12,
-  units = "in",     # Unidades: "in" (pulgadas), "cm", "mm", o "px"
-  dpi = 500
-)
-
-i
-}
-print(i)
-rm(UNION)
-}
-#print(conteo_mensual)
-
+# Desconexión de bases de datos al terminar
 dbDisconnect(con_scada)
-
 dbDisconnect(conPres)
+
+#writexl::write_xlsx(conteo_f,"F:/proyectos/contraloria_2026_419est/datos_conteo.xlsx")
+
+
 
 
 
@@ -349,7 +345,7 @@ p<-ggplot(conteos, aes(x = ano, y =total_registros , fill = factor(id_measure)))
   )
 
 ggsave(
-  filename = paste0("F:/proyectos/contr_imagenes/",id,"_.pdf"),
+  filename = paste0("F:/proyectos/contr_imagenes3/",id,"_.pdf"),
   plot = p,
   width = 8,
   height = 6,

@@ -125,15 +125,22 @@ def mostrar_pdf_como_imagen(ruta: Path) -> None:
 
 
 def construir_mapa(df: pd.DataFrame, seleccionado_id=None, color_por="FAMILIA") -> folium.Map:
-    m = folium.Map(location=CENTRO_COLOMBIA, zoom_start=5, tiles=None)
+    # Valores por defecto (vista general de Colombia)
+    centro = CENTRO_COLOMBIA
+    zoom = 5
+    
+    # Si hay una estación seleccionada, centramos el mapa en ella con mayor acercamiento
+    if seleccionado_id is not None:
+        fila_sel = df[df["id"] == seleccionado_id]
+        if not fila_sel.empty:
+            centro = [fila_sel.iloc[0]["lat"], fila_sel.iloc[0]["lon"]]
+            zoom = 11  # Nivel de zoom adecuado para ver la ubicación detallada
+
+    m = folium.Map(location=centro, zoom_start=zoom, tiles=None)
     folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Tiles &copy; Esri", name="Satélite (Esri)",
-    ).add_to(m)
-    folium.TileLayer(
-        tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-        attr="&copy; OpenTopoMap (CC-BY-SA)", name="Topográfico",
     ).add_to(m)
     
     COLORES = {
@@ -163,11 +170,10 @@ def construir_mapa(df: pd.DataFrame, seleccionado_id=None, color_por="FAMILIA") 
     folium.LayerControl(position="topright", collapsed=False).add_to(m)
     return m
 
-
 # ----------------------------------------------------------------------------
 # Interfaz de Usuario
 # ----------------------------------------------------------------------------
-st.title("🗺️ Mapa de puntos en Colombia")
+st.title("Verificación información estaciones_IDEAM")
 st.caption("Haz clic en un punto en el mapa o selecciónalo en la lista desplegable.")
 
 df = cargar_puntos()
@@ -179,18 +185,17 @@ if "seleccion" not in st.session_state:
 col_mapa, col_info = st.columns([1, 1], gap="medium")
 
 with col_mapa:
-    opcion = st.radio("Diferenciar por", ["Familia", "Tecnología"], horizontal=True)
-    color_por = "FAMILIA" if opcion == "Familia" else "TECNOLOGIA"
+    opcion = st.radio("Diferenciar por", ["Familia", "Tecnología", "Transmisión"], horizontal=True)
+    if opcion == "Familia":
+        color_por = "FAMILIA"
+    elif opcion == "Tecnología":
+        color_por = "TECNOLOGIA"
+    else:
+        color_por = "Transmisión"
+        
     mapa = construir_mapa(df, st.session_state.seleccion, color_por)
     
     salida = st_folium(mapa, use_container_width=True, height=750, key="mapa")
-
-    clic = (salida or {}).get("last_object_clicked")
-    if clic:
-        fila = punto_mas_cercano(df, clic["lat"], clic["lng"])
-        if fila is not None and fila["id"] != st.session_state.seleccion:
-            st.session_state.seleccion = fila["id"]
-            st.rerun()
 
 with col_info:
     # --- LISTA DESPLEGABLE PARA BUSCAR ESTACIÓN ---
