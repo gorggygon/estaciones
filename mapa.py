@@ -234,8 +234,23 @@ with col_info:
         st.write(fila["descripcion"])
         
         c1, c2 = st.columns(2)
-        c1.metric("Latitud", f"{fila['lat']:.4f}")
-        c2.metric("Longitud", f"{fila['lon']:.4f}")
+        c1.metric("Latitud", f"{fila['lat']:.3f}")
+        c2.metric("Longitud", f"{fila['lon']:.3f}")
+
+# --- ANÁLISIS ESTADÍSTICO DE LA SELECCIÓN ---
+        total_estaciones_red = len(df)
+        transmision_actual = str(fila.get("Transmisión", "")).strip()
+
+        if transmision_actual and transmision_actual.lower() != "nan":
+            match_grupo = df[df["Transmisión"].astype(str).str.strip().str.upper() == transmision_actual.upper()]
+            cantidad_grupo = len(match_grupo)
+            porcentaje = (cantidad_grupo / total_estaciones_red) * 100 if total_estaciones_red > 0 else 0
+            
+            st.info(
+                f"📈 **Análisis de Red:** De las **{total_estaciones_red}** estaciones en análisis, "
+                f"**{cantidad_grupo}** tienen transmisión tipo **{transmision_actual}** "
+                f"y corresponden al **{porcentaje:.1f}%** del total."
+            )
 
         if not df_datos.empty:
             cols_match = [c for c in df_datos.columns if "nom_auto" in c.lower() or "cne" in c.lower() or "estacion" in c.lower()]
