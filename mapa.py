@@ -68,7 +68,8 @@ def cargar_puntos() -> pd.DataFrame:
 
         df["id"] = df["id"].astype(str).str.split('.').str[0]
         df["pdf"] = df["Nombre"].astype(str) + "_.pdf"
-        df = df[df[columna_estado].str.upper() != "SUSPENDIDO"]
+        
+        # Se incluye el universo completo (eliminado el filtro de SUSPENDIDO)
 
         return df
     return pd.DataFrame()
@@ -135,35 +136,70 @@ def construir_mapa(df: pd.DataFrame, seleccionado_id=None, color_por="FAMILIA") 
             zoom = 11
 
     m = folium.Map(location=centro, zoom_start=zoom, tiles=None)
+    
+    # Mapas base con capas limpias
     folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Tiles &copy; Esri", name="Satélite (Esri)",
     ).add_to(m)
     
+    # Paleta de colores extendida para cubrir familias, tecnologías y cualquier tipo de transmisión
     COLORES = {
+        # Familias
         "PLUVIOMETRICAS": "#1f77b4", "HIDROLOGICAS": "#2ca02c",
         "CLIMATOLOGICAS": "#ff7f0e", "RADIOSONDAS": "#9467bd",
+        # Tecnologías
         "CONVENCIONAL": "#1f77b4", "AUTOMATICA": "#d62728",
         "HIDROLOGICA": "#2ca02c", "CLIMATOLOGICA": "#ff7f0e",
-        "EN LINEA": "#2ca02c", "INTERMITENTE": "#ff7f0e", "FUERA DE SERVICIO": "#d62728"
+        # Transmisión comunes y generales (colores variados)
+        "GOES": "#2ca02c", "CELULAR": "#1f77b4", "SATELITAL": "#9467bd",
+        "GSM": "#e377c2", "VHF": "#7f7f7f", "HF": "#bcbd22",
+        "INTERNET": "#17becf", "SINIESTRO": "#d62728", "MANUAL": "#8c564b"
     }
+    
+    # Paleta genérica por si aparece un tipo de transmisión nuevo en el Excel
+    paleta_dinamica = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+    
     grupos = {}
-    for _, f in df.iterrows():
+    for idx, f in df.iterrows():
         cat = str(f[color_por]) if pd.notna(f[color_por]) else "SIN DATO"
-        col = COLORES.get(cat.upper(), "gray")
+        cat_upper = cat.upper()
+        
+        if cat_upper not in COLORES:
+            # Asignar un color dinámico cíclico si no está en el diccionario fijo
+            COLORES[cat_upper] = paleta_dinamica[hash(cat_upper) % len(paleta_dinamica)]
+            
+        col = COLORES[cat_upper]
+        
         if cat not in grupos:
             grupos[cat] = folium.FeatureGroup(
                 name=f'<span style="color:{col};font-size:16px">●</span> {cat.capitalize()}'
             ).add_to(m)
+            
         activo = f["id"] == seleccionado_id
+        
+        # Si la opción es Transmisión, variamos ligeramente la forma usando estilos o marcadores de icono o radio diferenciado
+        if color_por == "Transmisión":
+            radio_punto = 14 if activo else 6
+            opacidad_relleno = 0.9 if activo else 0.45
+            grosor_borde = 4 if activo else 1.5
+            color_borde = "#000000" if activo else col
+        else:
+            radio_punto = 13 if activo else 4.5
+            opacidad_relleno = 0.9 if activo else 0.4
+            grosor_borde = 3 if activo else 1
+            color_borde = "black" if activo else col
+
         folium.CircleMarker(
             location=[f["lat"], f["lon"]],
-            radius=8 if activo else 4,
-            color="black" if activo else col,
-            weight=3 if activo else 1,
-            fill=True, fill_color=col, fill_opacity=0.8,
-            tooltip=f"{f.get('NOMBRE_CNE', '')} · {f.get('FAMILIA', '')} · {f.get('TECNOLOGIA', '')}",
+            radius=radio_punto,
+            color=color_borde,
+            weight=grosor_borde,
+            fill=True, 
+            fill_color=col, 
+            fill_opacity=opacidad_relleno,
+            tooltip=f"{f.get('NOMBRE_CNE', '')} · {f.get('FAMILIA', '')} · {f.get('TECNOLOGIA', '')} · Tx: {f.get('Transmisión', '')}",
         ).add_to(grupos[cat])
 
     folium.LayerControl(position="topright", collapsed=False).add_to(m)
@@ -212,7 +248,6 @@ with col_mapa:
     if total_red > 0:
         conteo_categorias = df[color_por].astype(str).str.strip().str.upper().value_counts()
         
-        # Generar texto descriptivo por cada categoría de manera independiente
         textos_analisis = []
         for cat, cantidad in conteo_categorias.items():
             if cat and cat != "NAN":
