@@ -51,7 +51,7 @@ def cargar_puntos() -> pd.DataFrame:
             "LATITUD": "lat",
             "LONGITUD": "lon",
             "FAMILIA": "FAMILIA",
-            "TX actual 2026":"Transmisión",
+            "TX actual 2026": "Transmisión",
             "TECN": "TECNOLOGIA"
         })
 
@@ -62,8 +62,8 @@ def cargar_puntos() -> pd.DataFrame:
         columna_estado = [c for c in df.columns if "estado" in c.lower()][0]
 
         df["descripcion"] = (
-            df["municipio"].fillna("") + " (" + df["departamento"].fillna("") + ") · "+df["FAMILIA"]+ " · "
-            + df["categoria"].fillna("") + " · " + df[columna_estado].fillna("")+ " · " +df["Transmisión"]
+            df["municipio"].fillna("") + " (" + df["departamento"].fillna("") + ") · " + df["FAMILIA"].fillna("") + " · "
+            + df["categoria"].fillna("") + " · " + df[columna_estado].fillna("") + " · " + df["Transmisión"].fillna("")
         )
 
         df["id"] = df["id"].astype(str).str.split('.').str[0]
@@ -125,16 +125,14 @@ def mostrar_pdf_como_imagen(ruta: Path) -> None:
 
 
 def construir_mapa(df: pd.DataFrame, seleccionado_id=None, color_por="FAMILIA") -> folium.Map:
-    # Valores por defecto (vista general de Colombia)
     centro = CENTRO_COLOMBIA
     zoom = 5
     
-    # Si hay una estación seleccionada, centramos el mapa en ella con mayor acercamiento
     if seleccionado_id is not None:
         fila_sel = df[df["id"] == seleccionado_id]
         if not fila_sel.empty:
             centro = [fila_sel.iloc[0]["lat"], fila_sel.iloc[0]["lon"]]
-            zoom = 11  # Nivel de zoom adecuado para ver la ubicación detallada
+            zoom = 11
 
     m = folium.Map(location=centro, zoom_start=zoom, tiles=None)
     folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
@@ -148,6 +146,7 @@ def construir_mapa(df: pd.DataFrame, seleccionado_id=None, color_por="FAMILIA") 
         "CLIMATOLOGICAS": "#ff7f0e", "RADIOSONDAS": "#9467bd",
         "CONVENCIONAL": "#1f77b4", "AUTOMATICA": "#d62728",
         "HIDROLOGICA": "#2ca02c", "CLIMATOLOGICA": "#ff7f0e",
+        "EN LINEA": "#2ca02c", "INTERMITENTE": "#ff7f0e", "FUERA DE SERVICIO": "#d62728"
     }
     grupos = {}
     for _, f in df.iterrows():
@@ -170,6 +169,7 @@ def construir_mapa(df: pd.DataFrame, seleccionado_id=None, color_por="FAMILIA") 
     folium.LayerControl(position="topright", collapsed=False).add_to(m)
     return m
 
+
 # ----------------------------------------------------------------------------
 # Interfaz de Usuario
 # ----------------------------------------------------------------------------
@@ -191,18 +191,41 @@ with col_mapa:
     elif opcion == "Tecnología":
         color_por = "TECNOLOGIA"
     else:
-        color_por = "Transmisión"     
-        
+        color_por = "Transmisión"
+
     mapa = construir_mapa(df, st.session_state.seleccion, color_por)
     
     salida = st_folium(mapa, use_container_width=True, height=750, key="mapa")
+
+    clic = (salida or {}).get("last_object_clicked")
+    if clic:
+        fila = punto_mas_cercano(df, clic["lat"], clic["lng"])
+        if fila is not None and fila["id"] != st.session_state.seleccion:
+            st.session_state.seleccion = fila["id"]
+            st.rerun()
+
+    # --- ANÁLISIS ESTADÍSTICO GLOBAL E INDEPENDIENTE DE LA SELECCIÓN ---
+    st.markdown("---")
+    st.subheader(f"📈 Análisis Global de Red ({opcion})")
+    
+    total_red = len(df)
+    if total_red > 0:
+        conteo_categorias = df[color_por].astype(str).str.strip().str.upper().value_counts()
+        
+        # Generar texto descriptivo por cada categoría de manera independiente
+        textos_analisis = []
+        for cat, cantidad in conteo_categorias.items():
+            if cat and cat != "NAN":
+                porcentaje = (cantidad / total_red) * 100
+                textos_analisis.append(f"- **{cantidad}** corresponden a estaciones **{cat.lower()}**, las cuales alcanzan el **{porcentaje:.1f}%**")
+        
+        st.info(f"De las **{total_red}** estaciones en análisis:\n" + "\n".join(textos_analisis))
 
 with col_info:
     # --- LISTA DESPLEGABLE PARA BUSCAR ESTACIÓN ---
     df_sorted = df.sort_values("NOMBRE_CNE")
     nombres_estaciones = ["-- Selecciona una estación --"] + list(df_sorted["NOMBRE_CNE"].unique())
     
-    # Encontrar el nombre actual si hay una selección activa
     nombre_actual = "-- Selecciona una estación --"
     if st.session_state.seleccion is not None:
         match_actual = df[df["id"] == st.session_state.seleccion]["NOMBRE_CNE"]
@@ -215,7 +238,6 @@ with col_info:
         index=nombres_estaciones.index(nombre_actual) if nombre_actual in nombres_estaciones else 0
     )
 
-    # Si el usuario selecciona una estación distinta en el menú
     if estacion_elegida != "-- Selecciona una estación --":
         fila_seleccionada_menu = df_sorted[df_sorted["NOMBRE_CNE"] == estacion_elegida].iloc[0]
         nuevo_id = fila_seleccionada_menu["id"]
@@ -234,38 +256,9 @@ with col_info:
         st.write(fila["descripcion"])
         
         c1, c2 = st.columns(2)
-        c1.metric("Latitud", f"{fila['lat']:.3f}")
-        c2.metric("Longitud", f"{fila['lon']:.3f}")
+        c1.metric("Latitud", f"{fila['lat']:.4f}")
+        c2.metric("Longitud", f"{fila['lon']:.4f}")
 
-# --- ANÁLISIS ESTADÍSTICO DINÁMICO REAL ---
-        total_estaciones_red = len(df)
-        
-        # Leemos directamente qué opción eligió el usuario en el radio button
-        opcion_actual = st.session_state.get("opcion_color", "Familia")
-        
-        if opcion_actual == "Familia":
-            columna_analisis = "FAMILIA"
-            etiqueta_tipo = "familia"
-        elif opcion_actual == "Tecnología":
-            columna_analisis = "TECNOLOGIA"
-            etiqueta_tipo = "tecnología"
-        else:
-            columna_analisis = "Transmisión"
-            etiqueta_tipo = "tipo de transmisión"
-
-        valor_actual = str(fila.get(columna_analisis, "")).strip()
-
-        if valor_actual and valor_actual.lower() != "nan":
-            match_grupo = df[df[columna_analisis].astype(str).str.strip().str.upper() == valor_actual.upper()]
-            cantidad_grupo = len(match_grupo)
-            porcentaje = (cantidad_grupo / total_estaciones_red) * 100 if total_estaciones_red > 0 else 0
-            
-            st.info(
-                f"📈 **Análisis de Red:** De las **{total_estaciones_red}** estaciones en análisis, "
-                f"**{cantidad_grupo}** son de {etiqueta_tipo} **{valor_actual}** "
-                f"y corresponden al **{porcentaje:.1f}%** del total."
-            )
-            
         if not df_datos.empty:
             cols_match = [c for c in df_datos.columns if "nom_auto" in c.lower() or "cne" in c.lower() or "estacion" in c.lower()]
             
@@ -314,6 +307,7 @@ with col_info:
                         st.write(f"Durante el periodo de análisis del año 2023 a la fecha, la estación registró información para las siguientes variables: {texto_vars}.")
                 else:
                     st.info("ℹ️ No se encontraron registros de conteo para esta estación en la hoja 'datos'.")
+
         st.markdown("---")
         ruta_pdf = PDF_DIR / str(fila["pdf"])
         if ruta_pdf.exists():
