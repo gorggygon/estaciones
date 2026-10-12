@@ -185,13 +185,13 @@ if "seleccion" not in st.session_state:
 col_mapa, col_info = st.columns([1, 1], gap="medium")
 
 with col_mapa:
-    opcion = st.radio("Diferenciar por", ["Familia", "Tecnología", "Transmisión"], horizontal=True)
+    opcion = st.radio("Diferenciar por", ["Familia", "Tecnología", "Transmisión"], horizontal=True, key="opcion_color")
     if opcion == "Familia":
         color_por = "FAMILIA"
     elif opcion == "Tecnología":
         color_por = "TECNOLOGIA"
     else:
-        color_por = "Transmisión"
+        color_por = "Transmisión"     
         
     mapa = construir_mapa(df, st.session_state.seleccion, color_por)
     
@@ -237,20 +237,23 @@ with col_info:
         c1.metric("Latitud", f"{fila['lat']:.3f}")
         c2.metric("Longitud", f"{fila['lon']:.3f}")
 
-# --- ANÁLISIS ESTADÍSTICO DINÁMICO DE LA SELECCIÓN ---
+# --- ANÁLISIS ESTADÍSTICO DINÁMICO REAL ---
         total_estaciones_red = len(df)
         
-        # 'color_por' ya sabe exactamente si estás agrupando por FAMILIA, TECNOLOGIA o Transmisión
-        columna_analisis = color_por 
-        valor_actual = str(fila.get(columna_analisis, "")).strip()
+        # Leemos directamente qué opción eligió el usuario en el radio button
+        opcion_actual = st.session_state.get("opcion_color", "Familia")
+        
+        if opcion_actual == "Familia":
+            columna_analisis = "FAMILIA"
+            etiqueta_tipo = "familia"
+        elif opcion_actual == "Tecnología":
+            columna_analisis = "TECNOLOGIA"
+            etiqueta_tipo = "tecnología"
+        else:
+            columna_analisis = "Transmisión"
+            etiqueta_tipo = "tipo de transmisión"
 
-        # Definir un nombre amigable para mostrar en el texto según la opción elegida
-        nombres_amigables = {
-            "FAMILIA": "familia",
-            "TECNOLOGIA": "tecnología",
-            "Transmisión": "tipo de transmisión"
-        }
-        etiqueta_tipo = nombres_amigables.get(columna_analisis, "categoría")
+        valor_actual = str(fila.get(columna_analisis, "")).strip()
 
         if valor_actual and valor_actual.lower() != "nan":
             match_grupo = df[df[columna_analisis].astype(str).str.strip().str.upper() == valor_actual.upper()]
@@ -262,6 +265,7 @@ with col_info:
                 f"**{cantidad_grupo}** son de {etiqueta_tipo} **{valor_actual}** "
                 f"y corresponden al **{porcentaje:.1f}%** del total."
             )
+            
         if not df_datos.empty:
             cols_match = [c for c in df_datos.columns if "nom_auto" in c.lower() or "cne" in c.lower() or "estacion" in c.lower()]
             
